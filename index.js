@@ -1,67 +1,90 @@
 'use strict';
-
 var React = require('react');
+var isMobile = require('./utils/isMobile')();
 var CodeMirror;
+var jsLintAddon;
 
-// adapted from:
-// https://github.com/facebook/react/blob/master/docs/_js/live_editor.js#L16
-
-// also used as an example:
-// https://github.com/facebook/react/blob/master/src/browser/ui/dom/components/ReactDOMInput.js
-
-var IS_MOBILE = typeof navigator === 'undefined' || (
-  navigator.userAgent.match(/Android/i)
-    || navigator.userAgent.match(/webOS/i)
-    || navigator.userAgent.match(/iPhone/i)
-    || navigator.userAgent.match(/iPad/i)
-    || navigator.userAgent.match(/iPod/i)
-    || navigator.userAgent.match(/BlackBerry/i)
-    || navigator.userAgent.match(/Windows Phone/i)
-);
-
-if (!IS_MOBILE) {
+if (!isMobile) {
   CodeMirror = require('codemirror');
+  require('./mode/javascript')(CodeMirror);
+  require('./addons/lint')(CodeMirror);
+  require('./addons/edit/matchBrackets')(CodeMirror);
+  require('./addons/edit/closeBrackets')(CodeMirror);
+  jsLintAddon = require('./addons/lint/javascript');
 }
 
 var CodeMirrorEditor = React.createClass({
-  getInitialState: function() {
-    return { isControlled: this.props.value != null };
-  },
 
   propTypes: {
-    value: React.PropTypes.string,
-    defaultValue: React.PropTypes.string,
-    style: React.PropTypes.object,
     className: React.PropTypes.string,
-    onChange: React.PropTypes.func
+    config: React.PropTypes.object,
+    defaultValue: React.PropTypes.string,
+    forceTextArea: React.PropTypes.bool,
+    linter: React.PropTypes.func,
+    onChange: React.PropTypes.func,
+    readOnly: React.PropTypes.bool,
+    style: React.PropTypes.object,
+    textAreaStyle: React.PropTypes.object,
+    textAreaClass: React.PropTypes.string,
+    textAreaClassName: React.PropTypes.string,
+    value: React.PropTypes.string
+  },
+
+  getInitialState: function() {
+    return { isControlled: typeof this.props.value !== 'undefined' };
   },
 
   componentDidMount: function() {
-    var isTextArea = this.props.forceTextArea || IS_MOBILE;
-    if (!isTextArea) {
-      this.editor = CodeMirror.fromTextArea(this.refs.editor.getDOMNode(), this.props);
-      this.editor.on('change', this.handleChange);
+    var isTextArea = this.props.forceTextArea || isMobile;
+    var config = this.props.config;
+    if (isTextArea) {
+      return;
+    }
+
+    jsLintAddon(CodeMirror, this.props.linter);
+    this._editor =
+      CodeMirror.fromTextArea(this.refs.editor.getDOMNode(), this.props);
+    this._editor.on('change', this._handleChange);
+    if (config) {
+      Object.keys(config).map(function(prop) {
+        var args = config[prop];
+        if (!Array.isArray(args)) {
+          args = [args];
+        }
+        if (prop.indexOf('set') !== -1) {
+          return this._editor[prop].apply(this._editor, args);
+        }
+        args.unshift(prop);
+        this._editor.setOption.apply(this._editor, args);
+      }.bind(this));
     }
   },
 
-  componentDidUpdate: function() {
-    if (this.editor) {
-      if (this.props.value != null) {
-        if (this.editor.getValue() !== this.props.value) {
-          this.editor.setValue(this.props.value);
+  componentWillReceiveProps: function(nextProps) {
+    var value = nextProps.value
+    if (this._editor) {
+      if (value != null) {
+        if (this._editor.getValue() !== value) {
+          this._editor.setValue(value);
         }
       }
     }
   },
 
-  handleChange: function() {
-    if (this.editor) {
-      var value = this.editor.getValue();
+  _handleChange: function(doc,change) {
+    delete change['from']
+    delete change['to']
+    if (this._editor) {
+      var value = this._editor.getValue();
+
       if (value !== this.props.value) {
-        this.props.onChange && this.props.onChange({target: {value: value}});
-        if (this.editor.getValue() !== this.props.value) {
+        if (this.props.onChange) {
+          this.props.onChange({target: {value: value}, change: change});
+        }
+
+        if (this._editor.getValue() !== this.props.value) {
           if (this.state.isControlled) {
-            this.editor.setValue(this.props.value);
+            this._editor.setValue(this.props.value);
           } else {
             this.props.value = value;
           }
@@ -81,7 +104,10 @@ var CodeMirrorEditor = React.createClass({
       className: this.props.textAreaClassName || this.props.textAreaClass
     });
 
-    return React.createElement('div', {style: this.props.style, className: this.props.className}, editor);
+    return React.createElement('div', {
+      style: this.props.style,
+      className: this.props.className
+    }, editor);
   }
 });
 
